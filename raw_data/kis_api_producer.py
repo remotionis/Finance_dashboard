@@ -38,7 +38,6 @@ def stockspurchase(data):
         "timestamp": int(time.time()),
         "fields": date_dict
     }
-    print(purchase_data)
     send_to_kafka("stock_trade", purchase_data)
 
 # 종목명 + 단축코드
@@ -118,7 +117,6 @@ def connect():
                     }
                     full_data.update(get_inquire(tr['url'], ptr_id=tr['tr_id'], tr_cont=content_type, params=params))
                 stockspurchase(full_data)
-                print(row)
                 time.sleep(0.05)
                     
     except Exception as e:
