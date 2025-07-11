@@ -14,7 +14,7 @@ import sys
 
 import pandas as pd
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pandas import DataFrame
 from kafka import KafkaProducer
 
@@ -24,6 +24,7 @@ producer = KafkaProducer(
     bootstrap_servers=['localhost:9092'],  # 필요 시 수정
     value_serializer=lambda v: json.dumps(v).encode('utf-8')
 )
+KST = timezone(timedelta(hours=9))
 
 def send_to_kafka(topic, data_dict):
     producer.send(topic, value=data_dict)
@@ -31,7 +32,7 @@ def send_to_kafka(topic, data_dict):
 
 # 수집시점 추가 후 Kafka 전송
 def stockspurchase(data):
-    now = datetime.now()
+    now = datetime.now(tz=KST)
     date_dict = {"stock_dt":now.strftime("%Y-%m-%d"), "stock_time":now.strftime("%H:%M:%S")}        
     date_dict.update(data)
     purchase_data = {

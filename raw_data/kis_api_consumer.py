@@ -18,48 +18,50 @@ def stockspurchase():
     # PostgreSQL 연결
     conn = psycopg2.connect(**db_config)
     cursor = conn.cursor()
-    for msg in consumer:
-        try:
-            data = msg.value
-            pValue = data['fields']
-            ts = str(data['timestamp'])
-            antc_amount = str(int(pValue['antc_vol']) * int(pValue['antc_cnpr']))
+    insert_txt = """INSERT INTO raw_data.stock_raw_info VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+    try:
+        while True:
+            for msg in consumer:
+                data = msg.value
+                pValue = data['fields']
+                ts = str(data['timestamp'])
+                antc_amount = str(int(pValue['antc_vol']) * int(pValue['antc_cnpr']))
 
-            # DB에 저장
-            cursor.execute("INSERT INTO raw_data.stock_raw_info VALUES ('" +
-                "', '".join([
-                    pValue['stock_dt'],
-                    pValue['stock_time'],
-                    ts,
-                    pValue['stock_code'],
-                    pValue['stock_name'],
-                    pValue['stck_oprc'],
-                    pValue['stck_prpr'],
-                    pValue['stck_hgpr'],
-                    pValue['stck_lwpr'],
-                    pValue['stck_prpr'],
-                    pValue['stck_sdpr'],
-                    pValue['prdy_vrss'],
-                    pValue['prdy_ctrt'],
-                    pValue['antc_vol'],
-                    antc_amount,
-                    pValue['acml_vol'],
-                    pValue['acml_tr_pbmn'],
-                    pValue['bidp1'],
-                    pValue['bidp_rsqn1'],
-                    pValue['askp1'],
-                    pValue['askp_rsqn1'],
-                    pValue['total_bidp_rsqn'],
-                    pValue['total_askp_rsqn'],
-                    pValue['wghn_avrg_stck_prc']
-                    ]) + "')"
-            )
-            conn.commit()
-        except Exception as e:
-            print(e)
-            cursor.close()
-            conn.close()
-            consumer.close()
+                # DB에 저장
+                cursor.execute(insert_txt, (
+                        pValue['stock_dt'],
+                        pValue['stock_time'],
+                        ts,
+                        pValue['stock_code'],
+                        pValue['stock_name'],
+                        pValue['stck_oprc'],
+                        pValue['stck_prpr'],
+                        pValue['stck_hgpr'],
+                        pValue['stck_lwpr'],
+                        pValue['stck_prpr'],
+                        pValue['stck_sdpr'],
+                        pValue['prdy_vrss'],
+                        pValue['prdy_ctrt'],
+                        pValue['antc_vol'],
+                        antc_amount,
+                        pValue['acml_vol'],
+                        pValue['acml_tr_pbmn'],
+                        pValue['bidp1'],
+                        pValue['bidp_rsqn1'],
+                        pValue['askp1'],
+                        pValue['askp_rsqn1'],
+                        pValue['total_bidp_rsqn'],
+                        pValue['total_askp_rsqn'],
+                        pValue['wghn_avrg_stck_prc']
+                        )
+                )
+                conn.commit()
+    except Exception as e:
+        print(e)
+    finally:
+        cursor.close()
+        conn.close()
+        consumer.close()
 
 
 consumer = KafkaConsumer(
