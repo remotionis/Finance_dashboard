@@ -39,7 +39,6 @@ def load_allstock_KRX():
     stk_data = stk_data[['회사명', '종목코드']]
     stk_data = stk_data.rename(columns={'회사명': 'Name', '종목코드': 'Code'})
     #stk_data['Code'] = stk_data['Code'].apply(lambda x: f"{int(x):06d}")
-    print("KRX 종목 로딩 완료:", len(stk_data))
     return stk_data
 
 # 중복 전송 방지
@@ -64,7 +63,6 @@ def send_to_kafka(data):
     }
     if not is_duplicate(enriched):
         producer.send("stock_trade", enriched)
-        print(f"Kafka 전송 완료: {data.get('stock_code')}")
 
 # 비동기 API 요청 (동기 구조 참조 기반)
 async def fetch_one(session, tr, code):
@@ -150,4 +148,5 @@ if __name__ == "__main__":
         print("종료 요청 수신됨")
     except Exception as e:
         print(str(e))
-
+    finally:
+        producer.flush()
