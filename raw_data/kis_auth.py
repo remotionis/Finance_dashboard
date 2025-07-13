@@ -339,13 +339,11 @@ def _url_fetch(api_url, ptr_id, tr_cont, params, appendHeaders=None, postFlag=Fa
         print(f"URL: {url}, TR: {tr_id}")
         print(f"<header>\n{headers}")
         print(f"<body>\n{params}")
-
     if (postFlag):
         #if (hashFlag): set_order_hash_key(headers, params)
         res = requests.post(url, headers=headers, data=json.dumps(params))
     else:
         res = requests.get(url, headers=headers, params=params)
-
     if res.status_code == 200:
         ar = APIResp(res)
         if (_DEBUG): ar.printAll()
