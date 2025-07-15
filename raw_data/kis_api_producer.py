@@ -14,6 +14,10 @@ from more_itertools import chunked
 # Kafka 설정
 producer = KafkaProducer(
     bootstrap_servers=['localhost:9092'],
+    acks=1,
+    linger_ms=20,  # 버퍼링 시간 (20ms 대기하여 배치화)
+    batch_size=32768,  # 32KB 전송 단위
+    compression_type='gzip',
     value_serializer=lambda v: json.dumps(v).encode('utf-8')
 )
 
@@ -38,7 +42,6 @@ def load_allstock_KRX():
     stk_data = pd.read_html(krx_url, encoding='cp949', header=0)[0]
     stk_data = stk_data[['회사명', '종목코드']]
     stk_data = stk_data.rename(columns={'회사명': 'Name', '종목코드': 'Code'})
-    #stk_data['Code'] = stk_data['Code'].apply(lambda x: f"{int(x):06d}")
     return stk_data
 
 # 중복 전송 방지
@@ -81,10 +84,8 @@ async def fetch_one(session, tr, code):
         "FID_COND_MRKT_DIV_CODE": "J",
         "FID_INPUT_ISCD": code
     }
-    st = time.time()
     try:
         async with session.get(url, headers=headers, params=params) as response:
-            print(f"code: {code}, Gap: {time.time() - st}")
             if response.status != 200:
                 text = await response.text()
                 print(f"[{code}] {tr_id} 오류 | status={response.status} | {text}")
