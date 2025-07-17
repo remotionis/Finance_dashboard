@@ -36,45 +36,49 @@ def stockspurchase():
         conn = None
         try:
             conn = psycopg2.connect(**db_config)
-            cursor = conn.cursor()
+            #cursor = conn.cursor()
 
             print("Consumer 및 DB 연결 완료. 메시지 대기 중...")
             for msg in consumer:
                 try:
+                    if conn.closed != 0:
+                        conn = psycopg2.connect(**db_config)
+
                     data = msg.value
                     pValue = data['fields']
                     ts = str(data['timestamp'])
 
                     antc_amount = str(int(pValue.get('antc_vol', 0)) * int(pValue.get('antc_cnpr', 0)))
 
-                    cursor.execute(insert_txt, (
-                        pValue.get('stock_dt'),
-                        pValue.get('stock_time'),
-                        ts,
-                        pValue.get('stock_code'),
-                        pValue.get('stock_name'),
-                        pValue.get('stck_oprc'),
-                        pValue.get('stck_prpr'),
-                        pValue.get('stck_hgpr'),
-                        pValue.get('stck_lwpr'),
-                        pValue.get('stck_prpr'),
-                        pValue.get('stck_sdpr'),
-                        pValue.get('prdy_vrss'),
-                        pValue.get('prdy_ctrt'),
-                        pValue.get('antc_vol'),
-                        antc_amount,
-                        pValue.get('acml_vol'),
-                        pValue.get('acml_tr_pbmn'),
-                        pValue.get('bidp1'),
-                        pValue.get('bidp_rsqn1'),
-                        pValue.get('askp1'),
-                        pValue.get('askp_rsqn1'),
-                        pValue.get('total_bidp_rsqn'),
-                        pValue.get('total_askp_rsqn'),
-                        pValue.get('wghn_avrg_stck_prc')
-                    ))
-
-                    conn.commit()
+                    
+                    with conn.cursor() as cursor:
+                        cursor.execute(insert_txt, (
+                            pValue.get('stock_dt'),
+                            pValue.get('stock_time'),
+                            ts,
+                            pValue.get('stock_code'),
+                            pValue.get('stock_name'),
+                            pValue.get('stck_oprc'),
+                            pValue.get('stck_prpr'),
+                            pValue.get('stck_hgpr'),
+                            pValue.get('stck_lwpr'),
+                            pValue.get('stck_prpr'),
+                            pValue.get('stck_sdpr'),
+                            pValue.get('prdy_vrss'),
+                            pValue.get('prdy_ctrt'),
+                            pValue.get('antc_vol'),
+                            antc_amount,
+                            pValue.get('acml_vol'),
+                            pValue.get('acml_tr_pbmn'),
+                            pValue.get('bidp1'),
+                            pValue.get('bidp_rsqn1'),
+                            pValue.get('askp1'),
+                            pValue.get('askp_rsqn1'),
+                            pValue.get('total_bidp_rsqn'),
+                            pValue.get('total_askp_rsqn'),
+                            pValue.get('wghn_avrg_stck_prc')
+                        ))
+                        conn.commit()
                 except Exception as msg_err:
                     print(f"Kafka 메시지 처리 중 오류 발생: {msg_err}")
         except Exception as outer_err:

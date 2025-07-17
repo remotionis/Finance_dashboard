@@ -9,25 +9,15 @@ import time
 
 from datetime import datetime, timedelta, timezone
 from kafka import KafkaProducer
+from kafka.errors import KafkaError, NoBrokersAvailable
 from more_itertools import chunked
-
-# Kafka 설정
-producer = KafkaProducer(
-    bootstrap_servers=['localhost:9092'],
-    acks=1,
-    linger_ms=20,  # 버퍼링 시간 (20ms 대기하여 배치화)
-    batch_size=32768,  # 32KB 전송 단위
-    compression_type='gzip',
-    value_serializer=lambda v: json.dumps(v).encode('utf-8')
-)
 
 # 설정
 KST = timezone(timedelta(hours=9))
 MIN_FETCH_INTERVAL = timedelta(seconds=30)
 MAX_REQUESTS_PER_SECOND = 10
-
-recent_fetch_time = {}  # 종목별 마지막 수집 시각
-sent_cache = {}         # Kafka 전송 중복 방지
+recent_fetch_time = {}
+sent_cache = {}
 
 TRS = [
     {'tr_id': 'FHKST01010100', 'url': '/uapi/domestic-stock/v1/quotations/inquire-price'},
@@ -36,13 +26,22 @@ TRS = [
 
 BASE_URL = "https://openapi.koreainvestment.com:9443"
 
-# KRX 종목 목록 로딩
-def load_allstock_KRX():
-    krx_url = 'https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13'
-    stk_data = pd.read_html(krx_url, encoding='cp949', header=0)[0]
-    stk_data = stk_data[['회사명', '종목코드']]
-    stk_data = stk_data.rename(columns={'회사명': 'Name', '종목코드': 'Code'})
-    return stk_data
+# KafkaProducer 재생성 함수
+def create_kafka_producer():
+    while True:
+        try:
+            print("[Kafka] KafkaProducer 연결 시도 중...")
+            return KafkaProducer(
+                bootstrap_servers=['localhost:9092'],
+                acks=1,
+                linger_ms=20,
+                batch_size=32768,
+                compression_type='gzip',
+                value_serializer=lambda v: json.dumps(v).encode('utf-8')
+            )
+        except NoBrokersAvailable as e:
+            print("[Kafka] 브로커 연결 실패. 5초 후 재시도:", e)
+            time.sleep(5)
 
 # 중복 전송 방지
 def is_duplicate(data):
@@ -53,8 +52,9 @@ def is_duplicate(data):
     sent_cache[key_hash] = True
     return False
 
-# Kafka 전송
+# Kafka 전송 함수
 def send_to_kafka(data):
+    global producer
     now = datetime.now(tz=KST)
     enriched = {
         "timestamp": int(time.time()),
@@ -64,14 +64,35 @@ def send_to_kafka(data):
             **data
         }
     }
-    if not is_duplicate(enriched):
-        producer.send("stock_trade", enriched)
+    if is_duplicate(enriched):
+        return
 
-# 비동기 API 요청 (동기 구조 참조 기반)
+    try:
+        producer.send("stock_trade", enriched)
+    except (KafkaError, NoBrokersAvailable) as e:
+        print("[Kafka] 전송 실패. 프로듀서 재생성:", e)
+        try:
+            producer.close()
+        except Exception:
+            pass
+        producer = create_kafka_producer()
+
+# KRX 종목 목록 로딩 (예외 포함)
+def load_allstock_KRX():
+    try:
+        krx_url = 'https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13'
+        stk_data = pd.read_html(krx_url, encoding='cp949', header=0)[0]
+        stk_data = stk_data[['회사명', '종목코드']]
+        stk_data = stk_data.rename(columns={'회사명': 'Name', '종목코드': 'Code'})
+        return stk_data
+    except Exception as e:
+        print("[KRX] 종목 목록 로딩 실패:", e)
+        return pd.DataFrame(columns=['Name', 'Code'])
+
+# API 요청 (예외 포함)
 async def fetch_one(session, tr, code):
     url = f"{kis.getTREnv().my_url}{tr['url']}"
     tr_id = tr['tr_id']
-
     if tr_id[0] in ('T', 'J', 'C') and kis.isPaperTrading():
         tr_id = 'V' + tr_id[1:]
 
@@ -79,23 +100,23 @@ async def fetch_one(session, tr, code):
     headers["tr_id"] = tr_id
     headers["custtype"] = "P"
     headers["tr_cont"] = "application/json"
-
     params = {
         "FID_COND_MRKT_DIV_CODE": "J",
         "FID_INPUT_ISCD": code
     }
+
     try:
         async with session.get(url, headers=headers, params=params) as response:
             if response.status != 200:
                 text = await response.text()
-                print(f"[{code}] {tr_id} 오류 | status={response.status} | {text}")
+                print(f"[API] [{code}] {tr_id} 오류 | status={response.status} | {text}")
                 return {"rt_cd": "-1", "msg1": "HTTP Error"}
             return await response.json()
     except Exception as e:
-        print(f"[{code}] {tr_id} 요청 실패:", str(e))
+        print(f"[API] [{code}] {tr_id} 요청 실패:", e)
         return {"rt_cd": "-1", "msg1": str(e)}
 
-# 종목 1개 데이터 수집 및 Kafka 전송
+# 종목 하나 수집
 async def fetch_stock_data(session, name, code):
     now = datetime.now(tz=KST)
     if code in recent_fetch_time and now - recent_fetch_time[code] < MIN_FETCH_INTERVAL:
@@ -108,46 +129,70 @@ async def fetch_stock_data(session, name, code):
         for tr in TRS:
             res = await fetch_one(session, tr, code)
             if res.get("rt_cd") != "0":
-                print(f"요청 실패: {code} | {tr['tr_id']} | {res.get('msg1')}")
+                print(f"[fetch] 실패: {code} | {tr['tr_id']} | {res.get('msg1')}")
                 continue
 
-            output = res.get("output", {})
-            output1 = res.get("output1", {})
-            output2 = res.get("output2", {})
-
-            if output1 and output2:
-                output1.update(output2)
-                full_data.update(output1)
-            elif output:
-                full_data.update(output)
+            try:
+                output = res.get("output", {})
+                output1 = res.get("output1", {})
+                output2 = res.get("output2", {})
+                if output1 and output2:
+                    output1.update(output2)
+                    full_data.update(output1)
+                elif output:
+                    full_data.update(output)
+            except Exception as e:
+                print(f"[fetch] 응답 파싱 오류: {e}")
 
         send_to_kafka(full_data)
 
     except Exception as e:
-        print(f"오류 발생 [{code}]: {e}")
+        print(f"[fetch_stock_data] 처리 중 예외 발생: {e}")
 
-# 메인 루프 (슬롯화 + 병렬 실행)
+# 메인 루프
 async def main_loop():
-    kis.auth()
+    try:
+        kis.auth()
+    except Exception as e:
+        print("[인증] 실패:", e)
+        return
+
     allstock_df = load_allstock_KRX()
+    if allstock_df.empty:
+        print("[KRX] 유효한 종목 없음. 루프 종료.")
+        return
 
     connector = aiohttp.TCPConnector(limit=100, keepalive_timeout=15)
     timeout = aiohttp.ClientTimeout(total=2.0)
-    chunks = chunked(allstock_df.itertuples(index=False), MAX_REQUESTS_PER_SECOND)
+
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         while True:
-            for chunk in chunks:
+            chunks = chunked(allstock_df.itertuples(index=False), MAX_REQUESTS_PER_SECOND)
+            for i, chunk in enumerate(chunks):
                 tasks = [fetch_stock_data(session, row.Name, row.Code) for row in chunk]
-                await asyncio.gather(*tasks)
-                await asyncio.sleep(1)  # 초당 20개 요청 제한
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for res in results:
+                    if isinstance(res, Exception):
+                        print("[main_loop] 비동기 작업 중 예외 발생:", res)
+                await asyncio.sleep(1)
+                print(f"chunk {i*10}~{i*10+9} ended")
 
 # 진입점
 if __name__ == "__main__":
-    try:
-        asyncio.run(main_loop())
-    except KeyboardInterrupt:
-        print("종료 요청 수신됨")
-    except Exception as e:
-        print(str(e))
-    finally:
-        producer.flush()
+    while True:
+        try:
+            producer = create_kafka_producer()
+            asyncio.run(main_loop())
+        except KeyboardInterrupt:
+            print("종료 요청 수신됨")
+            break
+        except Exception as e:
+            print("[__main__] 전체 루프 예외 발생. 5초 후 재시작:", e)
+            time.sleep(5)
+        finally:
+            try:
+                producer.flush()
+                producer.close()
+            except Exception:
+                pass
+
