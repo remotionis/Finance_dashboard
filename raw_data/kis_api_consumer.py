@@ -5,11 +5,11 @@ import time
 
 # PostgreSQL 연결 정보
 db_config = {
-    'host': 'de6-team7-postgresql.cujzazvifwam.us-east-1.rds.amazonaws.com',
+    'host': '***',
     'port': 5432,
     'dbname': 'dev',
-    'user': 'stockuser',
-    'password': 'stockpw',
+    'user': '***',
+    'password': '***',
     'connect_timeout': 10
 }
 

@@ -26,11 +26,11 @@ consumer = KafkaConsumer(
 
 # RDS 접속 정보
 db_config = {
-    'host': 'de6-team7-postgresql.cujzazvifwam.us-east-1.rds.amazonaws.com',
+    'host': '***',
     'port': 5432,
     'dbname': 'dev',
-    'user': 'coinuser',
-    'password': 'coinpw'
+    'user': '***',
+    'password': '***'
 }
 
 insert_sql = """
